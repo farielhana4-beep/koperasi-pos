@@ -6,6 +6,7 @@ import CategoryFilters from './Partials/CategoryFilters';
 import PaymentModal from './Partials/PaymentModal';
 import PosErrorBoundary from './Partials/PosErrorBoundary';
 import ProductCard from './Partials/ProductCard';
+import ProductDetailModal from './Partials/ProductDetailModal';
 import ReceiptModal from './Partials/ReceiptModal';
 import {
     PosIcon,
@@ -70,6 +71,93 @@ function buildDraftReceipt({
                 normalizeMoney(item.price) * (normalizeMoney(item.quantity) || 1),
         })),
     };
+}
+
+function dispatchToast(toast) {
+    window.dispatchEvent(
+        new CustomEvent('app:toast', {
+            detail: {
+                tone: toast.tone ?? 'info',
+                title: toast.title ?? 'Notice',
+                message: toast.message ?? '',
+            },
+        }),
+    );
+}
+
+function openPrintableReceipt(receipt, currency = 'IDR') {
+    const receiptWindow = window.open('', '_blank', 'width=420,height=720');
+
+    if (!receiptWindow) {
+        dispatchToast({
+            tone: 'error',
+            title: 'Print blocked',
+            message: 'Allow pop-ups to print the receipt.',
+        });
+        return;
+    }
+
+    const formatCurrency = (value) =>
+        new Intl.NumberFormat('id-ID', {
+            style: 'currency',
+            currency,
+            maximumFractionDigits: 0,
+        }).format(Number(value ?? 0));
+    const escapeHtml = (value) =>
+        String(value ?? '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+
+    const items = Array.isArray(receipt?.items) ? receipt.items : [];
+
+    receiptWindow.document.write(`
+        <html>
+            <head>
+                <title>${receipt?.invoice_number ?? 'Receipt'}</title>
+                <meta charset="utf-8" />
+                <style>
+                    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #fff; color: #111827; }
+                    .wrap { max-width: 320px; margin: 0 auto; }
+                    h1, h2, p { margin: 0; }
+                    .muted { color: #6b7280; font-size: 12px; }
+                    .line { border-top: 1px dashed #d1d5db; margin: 12px 0; }
+                    .row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin: 6px 0; }
+                    .item { margin-bottom: 10px; }
+                    .total { font-size: 15px; font-weight: 700; }
+                </style>
+            </head>
+            <body>
+                <div class="wrap">
+                    <h1 style="font-size:18px;">${escapeHtml(receipt?.invoice_number ?? '-')}</h1>
+                    <p class="muted">${escapeHtml(receipt?.created_at ?? '-')}</p>
+                    <div class="line"></div>
+                    <p style="font-size:13px;">Cashier: ${escapeHtml(receipt?.cashier_name ?? '-')}</p>
+                    <p style="font-size:13px;">Payment: ${escapeHtml((receipt?.payment_method ?? '-').toUpperCase())}</p>
+                    <p style="font-size:13px;">Status: ${escapeHtml((receipt?.payment_status ?? '-').toUpperCase())}</p>
+                    <div class="line"></div>
+                    ${items.map((item) => `
+                        <div class="item">
+                            <div class="row"><span>${escapeHtml(item.name ?? '-')}</span><span>${escapeHtml(`${item.quantity} x ${formatCurrency(item.price)}`)}</span></div>
+                            <div class="row"><span class="muted">${escapeHtml(item.barcode ?? '-')}</span><span>${escapeHtml(formatCurrency(item.subtotal))}</span></div>
+                        </div>
+                    `).join('')}
+                    <div class="line"></div>
+                    <div class="row"><span>Subtotal</span><span>${escapeHtml(formatCurrency(receipt?.subtotal))}</span></div>
+                    <div class="row"><span>Tax</span><span>${escapeHtml(formatCurrency(receipt?.tax))}</span></div>
+                    <div class="row"><span>Discount</span><span>${escapeHtml(formatCurrency(receipt?.discount))}</span></div>
+                    <div class="row total"><span>Total</span><span>${escapeHtml(formatCurrency(receipt?.total))}</span></div>
+                    <div class="row"><span>Cash</span><span>${receipt?.cash_received !== null && receipt?.cash_received !== undefined ? escapeHtml(formatCurrency(receipt.cash_received)) : '-'}</span></div>
+                    <div class="row"><span>Change</span><span>${escapeHtml(formatCurrency(receipt?.change))}</span></div>
+                </div>
+            </body>
+        </html>
+    `);
+    receiptWindow.document.close();
+    receiptWindow.focus();
+    receiptWindow.print();
 }
 
 function StatCard({ label, value, note, icon, tone }) {
@@ -171,9 +259,14 @@ export default function Index({ products, categories, summary }) {
     const [saving, setSaving] = useState(false);
     const [receiptOpen, setReceiptOpen] = useState(false);
     const [receipt, setReceipt] = useState(null);
+    const [productDetailOpen, setProductDetailOpen] = useState(false);
+    const [productDetail, setProductDetail] = useState(null);
+    const [historyExpanded, setHistoryExpanded] = useState(false);
+    const [highlightedProductId, setHighlightedProductId] = useState(null);
     const [cartPulse, setCartPulse] = useState(false);
     const barcodeInputRef = useRef(null);
     const barcodeDebounceRef = useRef(null);
+    const recentTransactionStatusRef = useRef(new Map());
     const currency = settings?.branding?.currency ?? 'IDR';
     const midtransClientKey = settings?.midtrans?.client_key ?? '';
     const isProduction = Boolean(settings?.midtrans?.is_production);
@@ -234,6 +327,16 @@ export default function Index({ products, categories, summary }) {
 
     const cartCount = cart.length;
     const currentPaymentLabel = paymentModal ?? 'cash';
+    const recentTransactionItems = safeArray(recentTransactions);
+    const pendingQrisCount = useMemo(
+        () =>
+            recentTransactionItems.filter(
+                (item) =>
+                    item.payment_method === 'qris' &&
+                    item.payment_status === 'pending',
+            ).length,
+        [recentTransactionItems],
+    );
 
     useEffect(() => {
         barcodeInputRef.current?.focus();
@@ -242,6 +345,21 @@ export default function Index({ products, categories, summary }) {
     useEffect(() => {
         const handleShortcut = (event) => {
             if (event.key === 'Escape') {
+                if (receiptOpen) {
+                    setReceiptOpen(false);
+                    return;
+                }
+
+                if (productDetailOpen) {
+                    setProductDetailOpen(false);
+                    return;
+                }
+
+                if (paymentModal) {
+                    setPaymentModal(null);
+                    return;
+                }
+
                 clearCart();
             }
 
@@ -259,7 +377,52 @@ export default function Index({ products, categories, summary }) {
         window.addEventListener('keydown', handleShortcut);
 
         return () => window.removeEventListener('keydown', handleShortcut);
-    }, [cartCount, total]);
+    }, [cartCount, total, paymentModal, receiptOpen, productDetailOpen]);
+
+    useEffect(() => {
+        const currentStatusMap = new Map(
+            recentTransactionItems.map((item) => [
+                item.invoice_number,
+                item.payment_status,
+            ]),
+        );
+        const previousStatusMap = recentTransactionStatusRef.current;
+
+        recentTransactionItems.forEach((item) => {
+            const previousStatus = previousStatusMap.get(item.invoice_number);
+
+            if (previousStatus && previousStatus !== item.payment_status) {
+                dispatchToast({
+                    tone:
+                        item.payment_status === 'paid'
+                            ? 'success'
+                            : item.payment_status === 'pending'
+                                ? 'info'
+                                : 'error',
+                    title: 'Payment status updated',
+                    message: `${item.invoice_number} is now ${item.payment_status.toUpperCase()}.`,
+                });
+            }
+        });
+
+        recentTransactionStatusRef.current = currentStatusMap;
+    }, [recentTransactionItems]);
+
+    useEffect(() => {
+        if (!pendingQrisCount) {
+            return undefined;
+        }
+
+        const timer = window.setInterval(() => {
+            router.reload({
+                only: ['recentTransactions'],
+                preserveScroll: true,
+                preserveState: true,
+            });
+        }, 30000);
+
+        return () => window.clearInterval(timer);
+    }, [pendingQrisCount]);
 
     useEffect(() => {
         if (flash?.receipt) {
@@ -275,8 +438,8 @@ export default function Index({ products, categories, summary }) {
         if (
             !receiptPayload ||
             receiptPayload.payment_method !== 'qris' ||
+            receiptPayload.payment_status !== 'pending' ||
             !token ||
-            token.startsWith('qris-placeholder-') ||
             !midtransClientKey
         ) {
             return undefined;
@@ -335,10 +498,26 @@ export default function Index({ products, categories, summary }) {
 
     const addProduct = (product, options = {}) => {
         if (!product || product.stock <= 0) {
+            dispatchToast({
+                tone: 'error',
+                title: 'Out of stock',
+                message: `${product?.name ?? 'Item'} is not available.`,
+            });
             return;
         }
 
         const shouldRefocusBarcode = Boolean(options.refocusBarcode);
+        const currentCartItem = cart.find((item) => item.id === product.id);
+        const currentQuantity = Number(currentCartItem?.quantity ?? 0);
+
+        if (currentQuantity >= Number(product.stock ?? 0)) {
+            dispatchToast({
+                tone: 'error',
+                title: 'Stock limit reached',
+                message: `${product.name} only has ${product.stock} unit(s) available.`,
+            });
+            return;
+        }
 
         setCart((current) => {
             const safeCurrent = safeArray(current);
@@ -378,6 +557,13 @@ export default function Index({ products, categories, summary }) {
         setCartPulse(true);
         window.setTimeout(() => setCartPulse(false), 220);
         setBarcode('');
+        setHighlightedProductId(product.id);
+        dispatchToast({
+            tone: 'success',
+            title: 'Added to cart',
+            message: `${product.name} added to the cart.`,
+        });
+        window.setTimeout(() => setHighlightedProductId(null), 650);
 
         if (shouldRefocusBarcode) {
             window.requestAnimationFrame(() => {
@@ -432,9 +618,21 @@ export default function Index({ products, categories, summary }) {
                         return item;
                     }
 
+                    const numericNextQuantity = Math.max(
+                        normalizeMoney(nextQuantity) || 1,
+                        1,
+                    );
+                    if (numericNextQuantity > Number(item.stock ?? 0)) {
+                        dispatchToast({
+                            tone: 'error',
+                            title: 'Stock limit reached',
+                            message: `${item.name} only has ${item.stock} unit(s) available.`,
+                        });
+                    }
+
                     const quantity = Math.max(
                         1,
-                        Math.min(normalizeMoney(nextQuantity) || 1, item.stock || 1),
+                        Math.min(numericNextQuantity, item.stock || 1),
                     );
 
                     return {
@@ -492,6 +690,15 @@ export default function Index({ products, categories, summary }) {
         setPaymentModal('qris');
     };
 
+    const openCardModal = () => {
+        if (!cartCount) {
+            return;
+        }
+
+        setCashReceived('');
+        setPaymentModal('card');
+    };
+
     const previewReceipt = () => {
         if (!cartCount) {
             return;
@@ -512,8 +719,22 @@ export default function Index({ products, categories, summary }) {
         setReceiptOpen(true);
     };
 
+    const previewTransactionReceipt = (transaction) => {
+        if (!transaction) {
+            return;
+        }
+
+        setReceipt(transaction);
+        setReceiptOpen(true);
+    };
+
+    const previewProduct = (product) => {
+        setProductDetail(product);
+        setProductDetailOpen(true);
+    };
+
     const submitTransaction = () => {
-        if (!cartCount || saving || !paymentModal) {
+        if (!cartCount || saving || !paymentModal || paymentModal === 'card') {
             return;
         }
 
@@ -524,6 +745,7 @@ export default function Index({ products, categories, summary }) {
             {
                 payment_method: paymentModal,
                 cash_received: paymentModal === 'cash' ? cashReceived : null,
+                discount: safeDiscount,
                 items: cart.map((item) => ({
                     product_id: item.id,
                     quantity: item.quantity,
@@ -539,8 +761,20 @@ export default function Index({ products, categories, summary }) {
                     setCashReceived('');
                     setPaymentModal(null);
                     setDiscount(0);
+                    dispatchToast({
+                        tone: 'success',
+                        title: 'Checkout complete',
+                        message: 'Transaction saved successfully.',
+                    });
                     window.requestAnimationFrame(() => {
                         focusBarcodeInput();
+                    });
+                },
+                onError: () => {
+                    dispatchToast({
+                        tone: 'error',
+                        title: 'Checkout failed',
+                        message: 'Please review stock and payment details, then try again.',
                     });
                 },
             },
@@ -785,37 +1019,11 @@ export default function Index({ products, categories, summary }) {
                                             <ProductCard
                                                 key={product.id}
                                                 product={product}
+                                                isHighlighted={
+                                                    highlightedProductId === product.id
+                                                }
                                                 onAdd={addProduct}
-                                                onPreview={(nextProduct) => {
-                                                    const nextPrice = normalizeMoney(
-                                                        nextProduct?.selling_price,
-                                                    );
-
-                                                    setReceipt(
-                                                        buildDraftReceipt({
-                                                            cart: [
-                                                                {
-                                                                    id: nextProduct.id,
-                                                                    barcode:
-                                                                        nextProduct.barcode,
-                                                                    name: nextProduct.name,
-                                                                    price: nextPrice,
-                                                                    stock: nextProduct.stock,
-                                                                    quantity: 1,
-                                                                },
-                                                            ],
-                                                            subtotal: nextPrice,
-                                                            tax: nextPrice * 0.11,
-                                                            discount: 0,
-                                                            total: nextPrice * 1.11,
-                                                            cashReceived: nextPrice * 1.11,
-                                                            paymentMethod: 'cash',
-                                                            cashierName:
-                                                                auth.user?.name ?? '-',
-                                                        }),
-                                                    );
-                                                    setReceiptOpen(true);
-                                                }}
+                                                onPreview={previewProduct}
                                             />
                                         ))
                                     ) : (
@@ -847,11 +1055,16 @@ export default function Index({ products, categories, summary }) {
                                 onPreviewReceipt={previewReceipt}
                                 onOpenCash={openCashModal}
                                 onOpenQris={openQrisModal}
+                                onOpenCard={openCardModal}
                                 onSetDiscount={setDiscount}
                             />
 
                             <div className="glass-card rounded-[2rem] border border-white/10 bg-slate-900/80 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl">
-                                <div className="flex items-center justify-between gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setHistoryExpanded((value) => !value)}
+                                    className="flex w-full items-center justify-between gap-3 text-left"
+                                >
                                     <div>
                                         <div className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">
                                             Payment history
@@ -859,45 +1072,63 @@ export default function Index({ products, categories, summary }) {
                                         <h3 className="mt-2 text-lg font-semibold text-white">
                                             Recent transactions
                                         </h3>
+                                        <p className="mt-1 text-sm text-slate-400">
+                                            Click a transaction to reopen the receipt.
+                                        </p>
                                     </div>
-                                    <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
-                                        Live feed
-                                    </div>
-                                </div>
-
-                                <div className="mt-4 space-y-3">
-                                    {safeArray(recentTransactions).length ? (
-                                        safeArray(recentTransactions).map((item) => (
-                                            <div
-                                                key={item.invoice_number}
-                                                className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 transition hover:border-cyan-400/20 hover:bg-white/[0.06]"
-                                            >
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div>
-                                                        <div className="text-sm font-semibold text-white">
-                                                            {item.invoice_number}
-                                                        </div>
-                                                        <div className="mt-1 text-xs text-slate-400">
-                                                            {item.cashier_name} - {item.created_at}
-                                                        </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <div className="text-sm font-semibold text-cyan-300">
-                                                            {formatCurrency(item.total_price)}
-                                                        </div>
-                                                        <div className="mt-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">
-                                                            {item.payment_method} - {item.payment_status}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        ))
-                                    ) : (
-                                        <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
-                                            No recent payments yet. First transactions will appear here.
+                                    <div className="flex items-center gap-3">
+                                        <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+                                            {recentTransactionItems.length} records
                                         </div>
-                                    )}
-                                </div>
+                                        <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+                                            {historyExpanded ? 'Collapse' : 'Open'}
+                                        </div>
+                                    </div>
+                                </button>
+
+                                {historyExpanded ? (
+                                    <div className="mt-4 space-y-3">
+                                        {recentTransactionItems.length ? (
+                                            recentTransactionItems.map((item) => (
+                                                <button
+                                                    key={item.invoice_number}
+                                                    type="button"
+                                                    onClick={() =>
+                                                        previewTransactionReceipt(item)
+                                                    }
+                                                    className="w-full rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-left transition hover:border-cyan-400/20 hover:bg-white/[0.06]"
+                                                >
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <div>
+                                                            <div className="text-sm font-semibold text-white">
+                                                                {item.invoice_number}
+                                                            </div>
+                                                            <div className="mt-1 text-xs text-slate-400">
+                                                                {item.cashier_name} - {item.created_at}
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="text-sm font-semibold text-cyan-300">
+                                                                {formatCurrency(item.total_price ?? item.total)}
+                                                            </div>
+                                                            <div className="mt-1 text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                                                                {item.payment_method} - {item.payment_status}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            ))
+                                        ) : (
+                                            <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
+                                                No recent payments yet. First transactions will appear here.
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="mt-4 rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-sm text-slate-400">
+                                        History is collapsed. Open it when you need to reopen a receipt.
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -922,7 +1153,18 @@ export default function Index({ products, categories, summary }) {
                 <ReceiptModal
                     show={receiptOpen}
                     receipt={receipt}
+                    onPrint={() => openPrintableReceipt(receipt, currency)}
                     onClose={() => setReceiptOpen(false)}
+                />
+
+                <ProductDetailModal
+                    show={productDetailOpen}
+                    product={productDetail}
+                    onClose={() => setProductDetailOpen(false)}
+                    onAdd={(nextProduct) => {
+                        addProduct(nextProduct, { refocusBarcode: true });
+                        setProductDetailOpen(false);
+                    }}
                 />
             </PosErrorBoundary>
         </AuthenticatedLayout>

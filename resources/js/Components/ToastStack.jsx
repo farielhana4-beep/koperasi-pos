@@ -23,12 +23,36 @@ export default function ToastStack() {
     useEffect(() => {
         const next = [];
 
-        if (flash?.success) next.push({ id: 'success', tone: 'success', title: 'Success', message: flash.success });
-        if (flash?.error) next.push({ id: 'error', tone: 'error', title: 'Attention', message: flash.error });
-        if (flash?.message) next.push({ id: 'info', tone: 'info', title: 'Notice', message: flash.message });
+        if (flash?.success) next.push({ id: `flash-success-${Date.now()}`, tone: 'success', title: 'Success', message: flash.success });
+        if (flash?.error) next.push({ id: `flash-error-${Date.now()}`, tone: 'error', title: 'Attention', message: flash.error });
+        if (flash?.message) next.push({ id: `flash-message-${Date.now()}`, tone: 'info', title: 'Notice', message: flash.message });
 
-        setVisible(next);
+        setVisible((current) => [
+            ...current.filter((toast) => !String(toast.id).startsWith('flash-')),
+            ...next,
+        ]);
     }, [flash?.success, flash?.error, flash?.message]);
+
+    useEffect(() => {
+        const handleToast = (event) => {
+            const detail = event?.detail ?? {};
+            const id = detail.id ?? `toast-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+            setVisible((current) => [
+                ...current,
+                {
+                    id,
+                    tone: detail.tone ?? 'info',
+                    title: detail.title ?? 'Notice',
+                    message: detail.message ?? '',
+                },
+            ]);
+        };
+
+        window.addEventListener('app:toast', handleToast);
+
+        return () => window.removeEventListener('app:toast', handleToast);
+    }, []);
 
     useEffect(() => {
         if (!visible.length) return undefined;

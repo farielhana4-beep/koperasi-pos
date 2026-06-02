@@ -34,7 +34,7 @@ function formatCurrency(value) {
     }).format(Number(value ?? 0));
 }
 
-export default function ProductCard({ product, onAdd, onPreview }) {
+export default function ProductCard({ product, onAdd, onPreview, isHighlighted = false }) {
     if (!product) {
         return null;
     }
@@ -56,7 +56,11 @@ export default function ProductCard({ product, onAdd, onPreview }) {
                     onAdd(product);
                 }
             }}
-            className={`group flex h-full flex-col overflow-hidden rounded-[28px] border border-white/10 bg-slate-900/80 text-left shadow-2xl shadow-black/20 transition duration-300 hover:-translate-y-1 hover:border-cyan-400/25 hover:bg-slate-900 ${
+            className={`group flex h-full flex-col overflow-hidden rounded-[28px] border bg-slate-900/80 text-left shadow-2xl shadow-black/20 transition duration-300 hover:-translate-y-1 hover:bg-slate-900 ${
+                isHighlighted
+                    ? 'border-cyan-400/40 ring-2 ring-cyan-400/30'
+                    : 'border-white/10 hover:border-cyan-400/25'
+            } ${
                 isOutOfStock ? 'cursor-not-allowed opacity-55' : 'cursor-pointer'
             }`}
         >
@@ -73,6 +77,11 @@ export default function ProductCard({ product, onAdd, onPreview }) {
                     <span className="rounded-full border border-white/10 bg-slate-950/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-200">
                         {product.category ?? 'Uncategorized'}
                     </span>
+                    {isHighlighted ? (
+                        <span className="rounded-full border border-cyan-400/20 bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                            Added
+                        </span>
+                    ) : null}
                 </div>
 
                 <div className="absolute right-4 top-4">
@@ -87,7 +96,7 @@ export default function ProductCard({ product, onAdd, onPreview }) {
                     }}
                     className="absolute bottom-4 right-4 rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-white backdrop-blur transition hover:bg-white/20"
                 >
-                    Preview
+                    Details
                 </button>
             </div>
 

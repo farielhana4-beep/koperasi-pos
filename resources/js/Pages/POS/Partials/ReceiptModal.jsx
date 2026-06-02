@@ -13,7 +13,7 @@ function normalizeMoney(value) {
     return Number.isFinite(numeric) ? numeric : 0;
 }
 
-export default function ReceiptModal({ show, receipt, onClose }) {
+export default function ReceiptModal({ show, receipt, onClose, onPrint }) {
     if (!receipt) {
         return null;
     }
@@ -37,8 +37,8 @@ export default function ReceiptModal({ show, receipt, onClose }) {
 
                 <div className="space-y-4 px-6 py-6">
                     <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-4">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                        <div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
                                 <div className="text-xs uppercase tracking-[0.22em] text-slate-500">
                                     Cashier
                                 </div>
@@ -57,7 +57,15 @@ export default function ReceiptModal({ show, receipt, onClose }) {
                         </div>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
+                            <div className="text-xs uppercase tracking-[0.22em] text-slate-500">
+                                Transaction No.
+                            </div>
+                            <div className="mt-2 text-lg font-semibold text-white">
+                                {receipt.invoice_number ?? '-'}
+                            </div>
+                        </div>
                         <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-4">
                             <div className="text-xs uppercase tracking-[0.22em] text-slate-500">
                                 Subtotal
@@ -139,6 +147,17 @@ export default function ReceiptModal({ show, receipt, onClose }) {
                         </div>
                     </div>
 
+                    {receipt.payment_status ? (
+                        <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-300">
+                            <div className="text-xs uppercase tracking-[0.22em] text-slate-500">
+                                Payment status
+                            </div>
+                            <div className="mt-2 font-semibold text-white">
+                                {String(receipt.payment_status).toUpperCase()}
+                            </div>
+                        </div>
+                    ) : null}
+
                     {receipt.snap_token ? (
                         <div className="rounded-[28px] border border-cyan-400/20 bg-cyan-400/10 p-4 text-sm leading-6 text-cyan-50">
                             <div className="font-semibold">Midtrans Snap token detected</div>
@@ -147,6 +166,25 @@ export default function ReceiptModal({ show, receipt, onClose }) {
                             </p>
                         </div>
                     ) : null}
+
+                    <div className="flex flex-wrap justify-end gap-3 border-t border-white/10 pt-4">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-white transition hover:bg-white/10"
+                        >
+                            Close
+                        </button>
+                        {onPrint ? (
+                            <button
+                                type="button"
+                                onClick={onPrint}
+                                className="rounded-2xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
+                            >
+                                Print Receipt
+                            </button>
+                        ) : null}
+                    </div>
                 </div>
             </div>
         </Modal>

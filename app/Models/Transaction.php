@@ -13,16 +13,26 @@ class Transaction extends Model
     protected $fillable = [
         'invoice_number',
         'user_id',
+        'subtotal_price',
+        'tax_price',
+        'discount_price',
         'total_price',
         'payment_method',
         'payment_status',
         'midtrans_snap_token',
+        'cash_received',
+        'change_amount',
     ];
 
     protected function casts(): array
     {
         return [
+            'subtotal_price' => 'decimal:2',
+            'tax_price' => 'decimal:2',
+            'discount_price' => 'decimal:2',
             'total_price' => 'decimal:2',
+            'cash_received' => 'decimal:2',
+            'change_amount' => 'decimal:2',
             'payment_method' => PaymentMethod::class,
             'payment_status' => PaymentStatus::class,
         ];
@@ -36,5 +46,17 @@ class Transaction extends Model
     public function details(): HasMany
     {
         return $this->hasMany(TransactionDetail::class);
+    }
+
+    public function receiptItems(): array
+    {
+        return $this->details->map(fn (TransactionDetail $detail) => [
+            'product_id' => $detail->product_id,
+            'barcode' => $detail->product?->barcode,
+            'name' => $detail->product?->name,
+            'quantity' => $detail->quantity,
+            'price' => (float) $detail->price,
+            'subtotal' => (float) $detail->price * $detail->quantity,
+        ])->values()->all();
     }
 }

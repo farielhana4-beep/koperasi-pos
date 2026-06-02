@@ -32,18 +32,29 @@ export default function PaymentModal({
     currency = 'IDR',
 }) {
     const isCash = mode === 'cash';
+    const isQris = mode === 'qris';
+    const isCard = mode === 'card';
     const change = Math.max(Number(cashReceived || 0) - total, 0);
     const safeCart = safeArray(cart);
+    const confirmDisabled =
+        processing ||
+        !safeCart.length ||
+        (isCash && Number(cashReceived || 0) < total) ||
+        isCard;
 
     return (
         <Modal show={show} maxWidth="2xl" closeable onClose={onClose}>
             <div className="bg-slate-950 text-white">
                 <div className="border-b border-white/10 px-6 py-5">
                     <div className="text-xs font-semibold uppercase tracking-[0.28em] text-cyan-300">
-                        {isCash ? 'Cash Payment' : 'QRIS Payment'}
+                        {isCash ? 'Cash Payment' : isQris ? 'QRIS Payment' : 'Card Payment'}
                     </div>
                     <h3 className="mt-2 text-lg font-semibold">
-                        {isCash ? 'Confirm cash checkout' : 'Confirm QRIS checkout'}
+                        {isCash
+                            ? 'Confirm cash checkout'
+                            : isQris
+                                ? 'Confirm QRIS checkout'
+                                : 'Debit / Credit card coming soon'}
                     </h3>
                     <p className="mt-1 text-sm text-slate-400">
                         Review the receipt summary before saving the transaction.
@@ -137,7 +148,7 @@ export default function PaymentModal({
                                     </span>
                                 </div>
                             </div>
-                        ) : (
+                        ) : isQris ? (
                             <div className="rounded-[28px] border border-violet-400/20 bg-violet-400/10 p-4">
                                 <div className="text-sm font-semibold text-violet-200">
                                     Midtrans Snap ready
@@ -169,15 +180,26 @@ export default function PaymentModal({
                                     </div>
                                 </div>
                             </div>
+                        ) : (
+                            <div className="rounded-[28px] border border-dashed border-white/10 bg-white/[0.03] p-5">
+                                <div className="text-sm font-semibold text-white">
+                                    Card payment placeholder
+                                </div>
+                                <p className="mt-2 text-sm leading-6 text-slate-300">
+                                    Debit and credit card processing is reserved for a future gateway integration.
+                                    Keep using cash or QRIS to complete sales.
+                                </p>
+                            </div>
                         )}
 
                         <div className="rounded-[28px] border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-slate-300">
                             <div className="font-semibold text-white">
-                                {isCash ? 'Cash checkout' : 'QRIS checkout'}
+                                {isCash ? 'Cash checkout' : isQris ? 'QRIS checkout' : 'Card placeholder'}
                             </div>
                             <p className="mt-2">
-                                Review the receipt preview, then save the transaction to
-                                complete the sale.
+                                {isCard
+                                    ? 'This option is intentionally disabled until card processing is implemented.'
+                                    : 'Review the receipt preview, then save the transaction to complete the sale.'}
                             </p>
                         </div>
 
@@ -191,11 +213,13 @@ export default function PaymentModal({
                             </SecondaryButton>
                             <PrimaryButton
                                 type="button"
-                                disabled={processing || !safeCart.length || (isCash && Number(cashReceived || 0) < total)}
+                                disabled={confirmDisabled}
                                 className="bg-cyan-500 hover:bg-cyan-400 focus:ring-cyan-400"
                                 onClick={onConfirm}
                             >
-                                {processing
+                                {isCard
+                                    ? 'Unavailable'
+                                    : processing
                                     ? 'Saving...'
                                     : isCash
                                         ? 'Save Cash Payment'

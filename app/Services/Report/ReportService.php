@@ -18,10 +18,9 @@ class ReportService
     public function buildReport(ReportPeriod $period): array
     {
         [$start, $end] = $period->range();
-        $transactions = $this->transactionsQuery($start, $end)->get();
-        $completedTransactions = $transactions->filter(
-            fn (Transaction $transaction) => $transaction->payment_status === PaymentStatus::Paid,
-        );
+        $completedTransactions = $this->transactionsQuery($start, $end)
+            ->where('payment_status', PaymentStatus::Paid)
+            ->get();
 
         return [
             'period' => $period->value,
@@ -30,9 +29,9 @@ class ReportService
                 'start' => $start->toDateTimeString(),
                 'end' => $end->toDateTimeString(),
             ],
-            'summary' => $this->summaryCards($transactions, $completedTransactions),
+            'summary' => $this->summaryCards($completedTransactions),
             'timeline' => $this->timeline($period, $start, $end, $completedTransactions),
-            'payment_methods' => $this->paymentMethods($transactions),
+            'payment_methods' => $this->paymentMethods($completedTransactions),
             'top_products' => $this->topProducts($start, $end),
             'low_stock_alerts' => $this->lowStockAlerts(),
             'cashier_performance' => $this->cashierPerformance($start, $end),
@@ -66,10 +65,9 @@ class ReportService
             ->whereBetween('created_at', [$start, $end]);
     }
 
-    private function summaryCards(Collection $transactions, Collection $completedTransactions): array
+    private function summaryCards(Collection $completedTransactions): array
     {
         $totalRevenue = (float) $completedTransactions->sum('total_price');
-        $totalTransactions = $transactions->count();
         $paidCount = $completedTransactions->count();
 
         return [
@@ -77,13 +75,13 @@ class ReportService
                 'label' => 'Revenue',
                 'value' => $totalRevenue,
                 'format' => 'currency',
-                'note' => 'Completed transactions in period',
+                'note' => 'Completed sales in period',
             ],
             [
                 'label' => 'Transactions',
-                'value' => $totalTransactions,
+                'value' => $paidCount,
                 'format' => 'number',
-                'note' => 'All transactions in selected period',
+                'note' => 'Paid transactions only',
             ],
             [
                 'label' => 'Average Order',
@@ -221,6 +219,7 @@ class ReportService
             ])
             ->join('users', 'users.id', '=', 'transactions.user_id')
             ->whereBetween('transactions.created_at', [$start, $end])
+            ->where('transactions.payment_status', PaymentStatus::Paid)
             ->groupBy('users.id', 'users.name')
             ->orderByDesc('revenue')
             ->get()

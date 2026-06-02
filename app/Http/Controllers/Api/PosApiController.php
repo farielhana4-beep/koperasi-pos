@@ -50,18 +50,13 @@ class PosApiController extends Controller
                 'categories_count' => $categories->count(),
             ],
             'recentTransactions' => Transaction::query()
-                ->with('user:id,name')
+                ->with(['user:id,name', 'details.product:id,barcode,name'])
+                ->where('invoice_number', 'not like', 'INV-DEMO-%')
+                ->whereIn('payment_status', [PaymentStatus::Paid->value, PaymentStatus::Pending->value])
                 ->latest()
                 ->limit(8)
                 ->get()
-                ->map(fn (Transaction $transaction) => [
-                    'invoice_number' => $transaction->invoice_number,
-                    'cashier_name' => $transaction->user?->name,
-                    'payment_method' => $transaction->payment_method->value,
-                    'payment_status' => $transaction->payment_status->value,
-                    'total_price' => (float) $transaction->total_price,
-                    'created_at' => $transaction->created_at?->format('d M H:i'),
-                ])
+                ->map(fn (Transaction $transaction) => $this->mapTransaction($transaction))
                 ->values(),
         ]);
     }
@@ -72,6 +67,7 @@ class PosApiController extends Controller
         $validated = $request->validated();
         $paymentMethod = PaymentMethod::from($validated['payment_method']);
         $cashReceived = (float) ($validated['cash_received'] ?? 0);
+        $discount = (float) ($validated['discount'] ?? 0);
 
         $productIds = collect($validated['items'])->pluck('product_id')->all();
         $products = Product::query()
@@ -81,12 +77,14 @@ class PosApiController extends Controller
             ->get()
             ->keyBy('id');
 
-        $transaction = DB::transaction(function () use (
+        [$transaction, $receiptItems, $subtotal, $tax, $safeDiscount, $total] = DB::transaction(function () use (
             $validated,
             $paymentMethod,
             $cashReceived,
+            $discount,
             $products,
             $transactionService,
+            $midtransService,
             $user
         ) {
             $items = collect($validated['items'])
@@ -95,9 +93,11 @@ class PosApiController extends Controller
                     'product_id' => (int) $group->first()['product_id'],
                     'quantity' => (int) $group->sum('quantity'),
                 ])
-                ->values();
+                ->values()
+                ->all();
 
-            $grossTotal = 0;
+            $subtotal = 0;
+            $receiptItems = [];
 
             foreach ($items as $item) {
                 $product = $products->get($item['product_id']);
@@ -110,16 +110,35 @@ class PosApiController extends Controller
                     abort(422, "Insufficient stock for {$product->name}.");
                 }
 
-                $grossTotal += $item['quantity'] * (float) $product->selling_price;
+                $lineSubtotal = $item['quantity'] * (float) $product->selling_price;
+                $subtotal += $lineSubtotal;
+
+                $receiptItems[] = [
+                    'product_id' => $product->id,
+                    'name' => $product->name,
+                    'barcode' => $product->barcode,
+                    'quantity' => $item['quantity'],
+                    'price' => (float) $product->selling_price,
+                    'subtotal' => $lineSubtotal,
+                ];
             }
 
-            if ($paymentMethod === PaymentMethod::Cash && $cashReceived < $grossTotal) {
+            $tax = round($subtotal * 0.11, 2);
+            $safeDiscount = min(max($discount, 0), $subtotal + $tax);
+            $total = max($subtotal + $tax - $safeDiscount, 0);
+
+            if ($paymentMethod === PaymentMethod::Cash && $cashReceived < $total) {
                 abort(422, 'Cash received is not enough for this transaction.');
             }
 
             $transaction = $transactionService->createDraft($user);
             $transaction->forceFill([
-                'total_price' => $grossTotal,
+                'subtotal_price' => $subtotal,
+                'tax_price' => $tax,
+                'discount_price' => $safeDiscount,
+                'total_price' => $total,
+                'cash_received' => $paymentMethod === PaymentMethod::Cash ? $cashReceived : null,
+                'change_amount' => $paymentMethod === PaymentMethod::Cash ? max($cashReceived - $total, 0) : 0,
                 'payment_method' => $paymentMethod,
                 'payment_status' => $paymentMethod === PaymentMethod::Cash
                     ? PaymentStatus::Paid
@@ -138,57 +157,25 @@ class PosApiController extends Controller
                 $product->decrement('stock', $item['quantity']);
             }
 
-            return $transaction;
-        });
-
-        if ($paymentMethod === PaymentMethod::Qris) {
-            try {
-                $midtrans = $midtransService->createQrisPayment($transaction);
-                $transaction->forceFill([
-                    'midtrans_snap_token' => $midtrans['token'] ?? $midtrans['redirect_url'] ?? $transaction->midtrans_snap_token,
-                ])->save();
-            } catch (\Throwable) {
-                $transaction->forceFill([
-                    'midtrans_snap_token' => 'qris-placeholder-'.$transaction->invoice_number,
-                ])->save();
+            if ($paymentMethod === PaymentMethod::Qris) {
+                $midtransService->createQrisPayment($transaction);
             }
-        }
 
-        $change = $paymentMethod === PaymentMethod::Cash
-            ? max($cashReceived - (float) $transaction->total_price, 0)
-            : 0;
+            $transaction->loadMissing(['details.product:id,barcode,name', 'user:id,name']);
 
-        $receiptItems = collect($validated['items'])
-            ->groupBy('product_id')
-            ->map(function ($group) use ($products) {
-                $product = $products->get((int) $group->first()['product_id']);
-                $quantity = (int) $group->sum('quantity');
-                $price = (float) ($product?->selling_price ?? 0);
-
-                return [
-                    'product_id' => (int) $group->first()['product_id'],
-                    'name' => $product?->name,
-                    'barcode' => $product?->barcode,
-                    'quantity' => $quantity,
-                    'price' => $price,
-                    'subtotal' => $quantity * $price,
-                ];
-            })
-            ->values();
+            return [$transaction, $receiptItems, $subtotal, $tax, $safeDiscount, $total];
+        });
 
         return response()->json([
             'message' => "Transaction {$transaction->invoice_number} saved successfully.",
-            'transaction' => [
-                'invoice_number' => $transaction->invoice_number,
-                'payment_method' => $paymentMethod->value,
-                'payment_status' => $transaction->payment_status->value,
-                'total' => (float) $transaction->total_price,
-                'cash_received' => $paymentMethod === PaymentMethod::Cash ? $cashReceived : null,
-                'change' => $change,
-                'items' => $receiptItems,
-                'created_at' => now()->format('d M Y H:i'),
-                'cashier_name' => $user?->name,
-                'snap_token' => $transaction->midtrans_snap_token,
+            'transaction' => $this->mapTransaction($transaction),
+            'receipt' => $this->mapTransaction($transaction),
+            'receipt_items' => $receiptItems,
+            'totals' => [
+                'subtotal' => $subtotal,
+                'tax' => $tax,
+                'discount' => $safeDiscount,
+                'total' => $total,
             ],
         ]);
     }
@@ -208,6 +195,35 @@ class PosApiController extends Controller
             'stock_status' => $product->stock <= $product->min_stock
                 ? 'critical'
                 : ($product->stock <= max($product->min_stock * 2, 5) ? 'warning' : 'good'),
+        ];
+    }
+
+    private function mapTransaction(Transaction $transaction): array
+    {
+        $transaction->loadMissing(['details.product:id,barcode,name', 'user:id,name']);
+
+        return [
+            'id' => $transaction->id,
+            'invoice_number' => $transaction->invoice_number,
+            'payment_method' => $transaction->payment_method->value,
+            'payment_status' => $transaction->payment_status->value,
+            'subtotal' => (float) $transaction->subtotal_price,
+            'tax' => (float) $transaction->tax_price,
+            'discount' => (float) $transaction->discount_price,
+            'total' => (float) $transaction->total_price,
+            'cash_received' => $transaction->cash_received !== null ? (float) $transaction->cash_received : null,
+            'change' => (float) $transaction->change_amount,
+            'cashier_name' => $transaction->user?->name ?? '-',
+            'created_at' => $transaction->created_at?->format('d M Y H:i'),
+            'items' => $transaction->details->map(fn ($detail) => [
+                'product_id' => $detail->product_id,
+                'barcode' => $detail->product?->barcode,
+                'name' => $detail->product?->name,
+                'quantity' => $detail->quantity,
+                'price' => (float) $detail->price,
+                'subtotal' => (float) $detail->price * $detail->quantity,
+            ])->values()->all(),
+            'snap_token' => $transaction->midtrans_snap_token,
         ];
     }
 

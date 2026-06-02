@@ -1,11 +1,11 @@
 <?php
 
+use App\Http\Controllers\TransactionController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::middleware(['auth', 'verified', 'role:kasir,super_admin'])
     ->prefix('transactions')
     ->name('transactions.')
     ->group(function () {
-        Route::get('/', fn () => Inertia::render('Transactions/Index'))->name('index');
+        Route::get('/', [TransactionController::class, 'index'])->name('index');
     });

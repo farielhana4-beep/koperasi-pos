@@ -25,13 +25,26 @@ Route::get('/dashboard', function () {
     return Inertia::render('Dashboard', [
         'report' => $report,
         'metrics' => [
-            'today_revenue' => Transaction::query()->whereDate('created_at', today())->where('payment_status', PaymentStatus::Paid->value)->sum('total_price'),
-            'today_transactions' => Transaction::query()->whereDate('created_at', today())->count(),
+            'today_revenue' => Transaction::query()
+                ->where('invoice_number', 'not like', 'INV-DEMO-%')
+                ->whereDate('created_at', today())
+                ->where('payment_status', PaymentStatus::Paid->value)
+                ->sum('total_price'),
+            'today_transactions' => Transaction::query()
+                ->where('invoice_number', 'not like', 'INV-DEMO-%')
+                ->whereDate('created_at', today())
+                ->where('payment_status', PaymentStatus::Paid->value)
+                ->count(),
             'low_stock_products' => Product::query()->whereColumn('stock', '<=', 'min_stock')->count(),
-            'pending_qris' => Transaction::query()->where('payment_method', 'qris')->where('payment_status', PaymentStatus::Pending->value)->count(),
+            'pending_qris' => Transaction::query()
+                ->where('invoice_number', 'not like', 'INV-DEMO-%')
+                ->where('payment_method', 'qris')
+                ->where('payment_status', PaymentStatus::Pending->value)
+                ->count(),
         ],
         'recentTransactions' => Transaction::query()
             ->with('user:id,name')
+            ->where('invoice_number', 'not like', 'INV-DEMO-%')
             ->latest()
             ->limit(6)
             ->get()

@@ -91,6 +91,7 @@ export default function CartPanel({
     onPreviewReceipt,
     onOpenCash,
     onOpenQris,
+    onOpenCard,
     onSetDiscount,
 }) {
     const safeCart = safeArray(cart);
@@ -219,6 +220,23 @@ export default function CartPanel({
                         </div>
                     </button>
                 </div>
+
+                <button
+                    type="button"
+                    onClick={onOpenCard}
+                    disabled={!safeCart.length}
+                    className="mt-3 w-full rounded-[22px] border border-dashed border-white/10 bg-white/[0.03] px-4 py-4 text-left transition duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.05]"
+                >
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
+                        Payment
+                    </div>
+                    <div className="mt-1 text-base font-semibold text-white">
+                        Debit / Credit card placeholder
+                    </div>
+                    <div className="mt-1 text-xs text-slate-400">
+                        Coming soon
+                    </div>
+                </button>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <button

@@ -76,6 +76,8 @@ function PeriodButton({ active, children, ...props }) {
 
 export default function Index({ periods, selectedPeriod, report, exports }) {
     const periodLabel = periods.find((item) => item.value === selectedPeriod)?.label ?? 'Monthly';
+    const transactionsCard = report.summary.find((card) => card.label === 'Transactions');
+    const hasSales = Number(transactionsCard?.value ?? 0) > 0;
 
     const summaryCards = report.summary.map((card, index) => ({
         ...card,
@@ -177,93 +179,105 @@ export default function Index({ periods, selectedPeriod, report, exports }) {
                         title="Sales Analytics"
                         description="Revenue and completed transactions over the selected period."
                     >
-                        <div className="h-[360px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={salesTrend}>
-                                    <defs>
-                                        <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.45} />
-                                            <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.02} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
-                                    <XAxis
-                                        dataKey="label"
-                                        tick={{ fill: '#94a3b8', fontSize: 12 }}
-                                        axisLine={{ stroke: 'rgba(148,163,184,0.2)' }}
-                                        tickLine={false}
-                                    />
-                                    <YAxis
-                                        tickFormatter={(value) => formatCurrency(value)}
-                                        tick={{ fill: '#94a3b8', fontSize: 12 }}
-                                        axisLine={{ stroke: 'rgba(148,163,184,0.2)' }}
-                                        tickLine={false}
-                                    />
-                                    <Tooltip
-                                        contentStyle={{
-                                            background: '#020617',
-                                            border: '1px solid rgba(255,255,255,0.12)',
-                                            borderRadius: 16,
-                                            color: '#fff',
-                                        }}
-                                        formatter={(value) => formatCurrency(value)}
-                                    />
-                                    <Legend />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="revenue"
-                                        name="Revenue"
-                                        stroke="#22d3ee"
-                                        fill="url(#salesGradient)"
-                                        strokeWidth={3}
-                                    />
-                                    <Area
-                                        type="monotone"
-                                        dataKey="transactions"
-                                        name="Transactions"
-                                        stroke="#8b5cf6"
-                                        fillOpacity={0}
-                                        strokeWidth={2}
-                                    />
-                                </AreaChart>
-                            </ResponsiveContainer>
-                        </div>
+                        {hasSales ? (
+                            <div className="h-[360px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={salesTrend}>
+                                        <defs>
+                                            <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="5%" stopColor="#22d3ee" stopOpacity={0.45} />
+                                                <stop offset="95%" stopColor="#22d3ee" stopOpacity={0.02} />
+                                            </linearGradient>
+                                        </defs>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                                        <XAxis
+                                            dataKey="label"
+                                            tick={{ fill: '#94a3b8', fontSize: 12 }}
+                                            axisLine={{ stroke: 'rgba(148,163,184,0.2)' }}
+                                            tickLine={false}
+                                        />
+                                        <YAxis
+                                            tickFormatter={(value) => formatCurrency(value)}
+                                            tick={{ fill: '#94a3b8', fontSize: 12 }}
+                                            axisLine={{ stroke: 'rgba(148,163,184,0.2)' }}
+                                            tickLine={false}
+                                        />
+                                        <Tooltip
+                                            contentStyle={{
+                                                background: '#020617',
+                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                borderRadius: 16,
+                                                color: '#fff',
+                                            }}
+                                            formatter={(value) => formatCurrency(value)}
+                                        />
+                                        <Legend />
+                                        <Area
+                                            type="monotone"
+                                            dataKey="revenue"
+                                            name="Revenue"
+                                            stroke="#22d3ee"
+                                            fill="url(#salesGradient)"
+                                            strokeWidth={3}
+                                        />
+                                        <Area
+                                            type="monotone"
+                                            dataKey="transactions"
+                                            name="Transactions"
+                                            stroke="#8b5cf6"
+                                            fillOpacity={0}
+                                            strokeWidth={2}
+                                        />
+                                    </AreaChart>
+                                </ResponsiveContainer>
+                            </div>
+                        ) : (
+                            <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] px-4 py-16 text-center text-sm text-slate-400">
+                                No completed sales yet. Once the first real transaction is paid, this chart will populate automatically.
+                            </div>
+                        )}
                     </SectionCard>
 
                     <SectionCard
                         title="Payment Method Statistics"
                         description="Transaction volume and revenue by payment type."
                     >
-                        <div className="h-[360px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={paymentChart}
-                                        dataKey="value"
-                                        nameKey="name"
-                                        innerRadius={80}
-                                        outerRadius={120}
-                                        paddingAngle={4}
-                                    >
-                                        {paymentChart.map((entry, index) => (
-                                            <Cell
-                                                key={entry.name}
-                                                fill={COLORS[index % COLORS.length]}
-                                            />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip
-                                        contentStyle={{
-                                            background: '#020617',
-                                            border: '1px solid rgba(255,255,255,0.12)',
-                                            borderRadius: 16,
-                                            color: '#fff',
-                                        }}
-                                    />
-                                    <Legend />
-                                </PieChart>
-                            </ResponsiveContainer>
-                        </div>
+                        {hasSales ? (
+                            <div className="h-[360px] w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <PieChart>
+                                        <Pie
+                                            data={paymentChart}
+                                            dataKey="value"
+                                            nameKey="name"
+                                            innerRadius={80}
+                                            outerRadius={120}
+                                            paddingAngle={4}
+                                        >
+                                            {paymentChart.map((entry, index) => (
+                                                <Cell
+                                                    key={entry.name}
+                                                    fill={COLORS[index % COLORS.length]}
+                                                />
+                                            ))}
+                                        </Pie>
+                                        <Tooltip
+                                            contentStyle={{
+                                                background: '#020617',
+                                                border: '1px solid rgba(255,255,255,0.12)',
+                                                borderRadius: 16,
+                                                color: '#fff',
+                                            }}
+                                        />
+                                        <Legend />
+                                    </PieChart>
+                                </ResponsiveContainer>
+                            </div>
+                        ) : (
+                            <div className="rounded-[24px] border border-dashed border-white/10 bg-white/[0.03] px-4 py-16 text-center text-sm text-slate-400">
+                                No completed sales yet. Payment breakdown will appear here after the first paid transaction.
+                            </div>
+                        )}
                     </SectionCard>
                 </section>
 

@@ -7,6 +7,7 @@ use App\Models\Transaction;
 use App\Services\Settings\SettingsService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use RuntimeException;
 
 class MidtransWebhookController extends Controller
 {
@@ -14,6 +15,7 @@ class MidtransWebhookController extends Controller
     {
         $payload = $request->all();
         $orderId = (string) ($payload['order_id'] ?? '');
+        $signatureKey = (string) ($payload['signature_key'] ?? '');
 
         if ($orderId === '') {
             return response()->json(['message' => 'Missing order_id.'], 422);
@@ -25,8 +27,25 @@ class MidtransWebhookController extends Controller
             return response()->json(['message' => 'Transaction not found.'], 404);
         }
 
+        $serverKey = $settings->midtrans()['server_key'];
+        if (blank($serverKey)) {
+            throw new RuntimeException('Midtrans server key is not configured.');
+        }
+
+        $expectedSignature = hash('sha512', implode('', [
+            $orderId,
+            (string) ($payload['status_code'] ?? ''),
+            (string) ($payload['gross_amount'] ?? ''),
+            $serverKey,
+        ]));
+
+        if ($signatureKey !== '' && ! hash_equals($expectedSignature, $signatureKey)) {
+            return response()->json(['message' => 'Invalid signature.'], 403);
+        }
+
         $status = (string) ($payload['transaction_status'] ?? 'pending');
         $fraudStatus = (string) ($payload['fraud_status'] ?? '');
+        $grossAmount = (float) ($payload['gross_amount'] ?? $transaction->total_price);
 
         $nextStatus = match ($status) {
             'settlement', 'capture' => $fraudStatus === 'challenge'
@@ -41,6 +60,7 @@ class MidtransWebhookController extends Controller
         $transaction->forceFill([
             'payment_status' => $nextStatus,
             'midtrans_snap_token' => $transaction->midtrans_snap_token ?: ($payload['token'] ?? null),
+            'total_price' => $grossAmount,
         ])->save();
 
         return response()->json([
